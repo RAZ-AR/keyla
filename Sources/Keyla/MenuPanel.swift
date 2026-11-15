@@ -9,6 +9,8 @@ final class MenuModel: ObservableObject {
     @Published var missingAccessibility = false
     @Published var missingInputMonitoring = false
     @Published var secureInput = false
+    @Published var secureOwner: String?
+    @Published var secureIsGlitch = false
     @Published var recording = false
     @Published var switchesToday = 0
 
@@ -24,13 +26,15 @@ struct MenuActions {
     var voice: () -> Void = {}
     var settings: () -> Void = {}
     var quit: () -> Void = {}
+    var lockScreen: () -> Void = {}
 }
 
 /// Row button: full-width hit area, subtle ink wash when pressed.
 private struct RowStyle: ButtonStyle {
+    var vertical: CGFloat = 11
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .padding(.horizontal, K.s4).padding(.vertical, 11)
+            .padding(.horizontal, K.s4).padding(.vertical, vertical)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(K.ink.opacity(configuration.isPressed ? 0.08 : 0))
             .contentShape(Rectangle())
@@ -64,21 +68,27 @@ struct MenuPanelView: View {
             .padding(.horizontal, K.s4).padding(.top, K.s4).padding(.bottom, K.s3)
             .accessibilityElement(children: .combine)
 
-            FlowRow {
+            VStack(spacing: 0) {
                 ForEach(model.layouts) { l in
                     let on = l.id == model.currentID
                     Button { actions.selectLayout(l.id) } label: {
-                        Text(l.name).font(K.text(13, on ? .bold : .regular))
-                            .foregroundStyle(on ? K.paper : K.ink)
-                            .padding(.horizontal, 12).padding(.vertical, 7)
-                            .background(Capsule().fill(on ? K.ink : .clear))
-                            .fixedSize().contentShape(Capsule())
+                        HStack(spacing: 12) {
+                            ZStack {
+                                Circle().strokeBorder(K.ink, lineWidth: 1.5)
+                                Circle().fill(K.ink).scaleEffect(on ? 1 : 0.001)
+                            }
+                            .frame(width: 14, height: 14)
+                            Text(l.name).font(K.text(14, on ? .bold : .regular)).foregroundStyle(K.ink)
+                                .lineLimit(1).truncationMode(.middle)
+                            Spacer(minLength: 8)
+                            Text(l.short).font(K.text(12, .medium)).foregroundStyle(K.muted)
+                        }
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(RowStyle(vertical: 7))
                     .accessibilityAddTraits(on ? .isSelected : [])
                 }
             }
-            .padding(.horizontal, K.s4 - 12).padding(.bottom, K.s3)
+            .padding(.bottom, K.s2)
             Rule()
 
             VStack(spacing: 0) {
@@ -123,7 +133,14 @@ struct MenuPanelView: View {
             banner("Включите Keyla в «Мониторинге ввода»", action: actions.openInputMonitoring)
         }
         if model.secureInput {
-            banner("Включён «Защищённый ввод» — Keyla не видит клавиши. Заблокируйте и разблокируйте экран: ⌃⌘Q", action: nil)
+            if model.secureIsGlitch || model.secureOwner == nil {
+                // macOS glitch: loginwindow kept Secure Input. Lock + unlock releases it.
+                banner("macOS завис в «Защищённом вводе» — Keyla не видит клавиши. Нажмите: экран заблокируется, после разблокировки всё заработает.",
+                       action: actions.lockScreen)
+            } else {
+                banner("«\(model.secureOwner!)» включил защищённый ввод (поле пароля). Закройте его — и Keyla снова заработает.",
+                       action: nil)
+            }
         }
     }
 
@@ -146,6 +163,7 @@ struct MenuPanelView: View {
         .padding(.horizontal, K.s4).padding(.vertical, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(fill)
+        .overlay(alignment: .bottom) { Rectangle().fill(Color.black.opacity(0.18)).frame(height: 1) }
         .contentShape(Rectangle())
     }
 

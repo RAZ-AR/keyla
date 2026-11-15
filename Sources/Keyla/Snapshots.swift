@@ -66,7 +66,7 @@ enum Snapshots {
         mm.layouts = LayoutManager.shared.layouts.map { .init(id: $0.id, name: $0.name, short: $0.short) }
         mm.currentID = mm.layouts.first(where: { $0.short == "RU" })?.id ?? mm.layouts.first?.id ?? ""
         render(MenuPanelView(model: mm, actions: MenuActions()), "menu-panel", to: dir)
-        mm.missingInputMonitoring = true; mm.secureInput = true; mm.recording = true
+        mm.missingInputMonitoring = true; mm.secureInput = true; mm.secureIsGlitch = true; mm.recording = true
         render(MenuPanelView(model: mm, actions: MenuActions()), "menu-panel-warnings", to: dir)
         for (name, app) in [("menubar-light", NSAppearance.Name.aqua), ("menubar-dark", .darkAqua)] {
             let img = MenuGlyph.image(height: 15)

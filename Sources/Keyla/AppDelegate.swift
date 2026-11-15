@@ -26,7 +26,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             convert: { [weak self] in self?.menuPanel.close(); KeyboardEngine.shared.manualConvert() },
             voice: { [weak self] in self?.menuPanel.close(); VoiceController.shared.toggle() },
             settings: { [weak self] in self?.menuPanel.close(); self?.openSettings() },
-            quit: { NSApp.terminate(nil) })
+            quit: { NSApp.terminate(nil) },
+            lockScreen: { [weak self] in self?.menuPanel.close(); SecureInput.lockScreen() })
         updateIndicator()
 
         DistributedNotificationCenter.default().addObserver(
@@ -48,7 +49,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         UserDefaults.standard.addObserver(self, forKeyPath: "indicatorStyle", options: [], context: nil)
         // Secure Input (password fields, or a stuck loginwindow) hides all keystrokes from Keyla.
         Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
-            let on = IsSecureEventInputEnabled()
+            let on = SecureInput.isOn
             if on != self?.secureInputOn { self?.secureInputOn = on; self?.updateIndicator() }
         }
         startEngine()
@@ -124,6 +125,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         m.missingAccessibility = !hasAccessibility
         m.missingInputMonitoring = !hasInputMonitoring
         m.secureInput = secureInputOn
+        let owner = secureInputOn ? SecureInput.owner() : nil
+        m.secureOwner = owner?.name
+        m.secureIsGlitch = owner?.isSystemGlitch ?? false
         m.recording = VoiceController.shared.isRecording
         m.switchesToday = UserDefaults.standard.integer(forKey: Stats.key("switch"))
     }
