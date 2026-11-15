@@ -31,7 +31,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         DistributedNotificationCenter.default().addObserver(
             forName: NSNotification.Name(kTISNotifySelectedKeyboardInputSourceChanged as String),
-            object: nil, queue: .main) { [weak self] _ in self?.updateIndicator() }
+            object: nil, queue: .main) { [weak self] _ in self?.rememberLayoutForFrontApp(); self?.updateIndicator() }
         DistributedNotificationCenter.default().addObserver(
             forName: NSNotification.Name(kTISNotifyEnabledKeyboardInputSourcesChanged as String),
             object: nil, queue: .main) { _ in LayoutManager.shared.reload() }
@@ -41,6 +41,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if let app = n.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
                app.bundleIdentifier != Bundle.main.bundleIdentifier {
                 AppDelegate.lastExternalAppID = app.bundleIdentifier
+                self?.restoreLayout(for: app)
             }
             self?.updateIndicator()
         }
@@ -51,6 +52,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if on != self?.secureInputOn { self?.secureInputOn = on; self?.updateIndicator() }
         }
         startEngine()
+        registerLoginItemOnce()
+        if !UserDefaults.standard.bool(forKey: "onboarded") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { OnboardingController.shared.show() }
+        }
+    }
+
+    // MARK: Per-app layout memory
+
+    private func rememberLayoutForFrontApp() {
+        guard Settings.perAppLayout,
+              let id = NSWorkspace.shared.frontmostApplication?.bundleIdentifier, id != Bundle.main.bundleIdentifier,
+              let cur = LayoutManager.shared.current?.id else { return }
+        var map = Settings.appLayouts
+        if map[id] != cur { map[id] = cur; Settings.appLayouts = map }
+    }
+
+    private func restoreLayout(for app: NSRunningApplication) {
+        guard Settings.perAppLayout, let id = app.bundleIdentifier,
+              let saved = Settings.appLayouts[id], let l = LayoutManager.shared.layout(withID: saved),
+              l.id != LayoutManager.shared.current?.id else { return }
+        LayoutManager.shared.select(l)
+    }
+
+    /// Turn on "open at login" once, on the first run from /Applications. After that the user's choice wins
+    /// (including switching it off in System Settings → General → Login Items).
+    private func registerLoginItemOnce() {
+        let d = UserDefaults.standard
+        guard !d.bool(forKey: "loginItemRegistered"), Bundle.main.bundlePath.hasPrefix("/Applications/") else { return }
+        if Settings.d.bool(forKey: "launchAtLogin") { LoginItem.set(true) }
+        d.set(true, forKey: "loginItemRegistered")
     }
 
     override func observeValue(forKeyPath keyPath: String?, of object: Any?, change: [NSKeyValueChangeKey: Any]?, context: UnsafeMutableRawPointer?) {

@@ -58,6 +58,10 @@ enum Snapshots {
             hud.title = s.0; hud.subtitle = s.1; hud.badge = s.2; hud.level = s.3
             render(HUDView(model: hud).padding(12).background(Color.white), "hud-\(i)", to: dir)
         }
+        let om = OnboardingModel()
+        render(OnboardingView(model: om, openAccessibility: {}, openInputMonitoring: {}, setLogin: { _ in }, done: {}), "onboarding-start", to: dir)
+        om.accessibility = true; om.inputMonitoring = true; om.loginItem = true; om.tryText = "привет "
+        render(OnboardingView(model: om, openAccessibility: {}, openInputMonitoring: {}, setLogin: { _ in }, done: {}), "onboarding-done", to: dir)
         let mm = MenuModel()
         mm.layouts = LayoutManager.shared.layouts.map { .init(id: $0.id, name: $0.name, short: $0.short) }
         mm.currentID = mm.layouts.first(where: { $0.short == "RU" })?.id ?? mm.layouts.first?.id ?? ""

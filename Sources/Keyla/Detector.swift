@@ -89,10 +89,12 @@ enum Detector {
     static func core(_ s: String) -> String { s.trimmingCharacters(in: CharacterSet.letters.inverted) }
 
     /// Decide whether `cur` (what appeared on screen) was really meant as `alt` (same keys, other layout).
-    static func shouldSwitch(cur: String, curLang: String, alt: String, altLang: String) -> Bool {
+    /// `context` is the language of the previous word in this sentence, if known.
+    static func shouldSwitch(cur: String, curLang: String, alt: String, altLang: String, context: String? = nil) -> Bool {
         let c = core(cur), a = core(alt)
         guard a.count >= 2, c.count >= 1 else { return false }
         if Settings.exceptions.contains(cur.lowercased()) || Settings.exceptions.contains(c.lowercased()) { return false }
+        if Settings.learnedSwitch.contains(c.lowercased()) { return true }
         if cur.contains(where: { $0.isNumber }) { return false }
         if cur.contains("@") || cur.contains("://") { return false }
         // Inner punctuation (e.g. "ghbdtn,rfr") — not a single word in the other layout either; keep it simple.
@@ -100,10 +102,12 @@ enum Detector {
 
         if Spell.isValid(c, curLang) { return false }
         if Spell.isValid(a, altLang) { return true }
-        guard a.count >= 4 else { return false }
+        guard a.count >= (context == altLang ? 3 : 4) else { return false }
         // Both unknown: if the current word is one typo away from a real word, it's a typo, not a layout mistake.
         if Spell.guesses(c, curLang).contains(where: { levenshtein($0.lowercased(), c.lowercased()) <= 1 }) { return false }
-        return plausibility(a, altLang) - plausibility(c, curLang) > 0.6
+        // The sentence is already in the other language: a smaller lead is enough.
+        let margin = context == altLang ? 0.15 : 0.6
+        return plausibility(a, altLang) - plausibility(c, curLang) > margin
     }
 
     private static let vowels: [String: Set<Character>] = [

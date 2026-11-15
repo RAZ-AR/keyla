@@ -29,12 +29,14 @@ final class KeyboardEngine {
         let strokes: [Stroke]
         let time = Date()
     }
-    private struct LastWord { let strokes: [Stroke]; let shown: String; let layout: KeyLayout; let boundary: String }
+    /// `byKeyla`: the shown text is Keyla's conversion, so converting it back means "that was wrong".
+    private struct LastWord { let strokes: [Stroke]; let shown: String; let layout: KeyLayout; let boundary: String; var byKeyla = false }
 
     private var word: [Stroke] = []
     private var lastWord: LastWord?
     private var pendingUndo: Undo?
     private var sentence = ""
+    private var lastLang: String?     // language of the previous word in this sentence
 
     private var shiftDownAt: Date?
     private var otherKeySinceShift = false
@@ -69,6 +71,7 @@ final class KeyboardEngine {
     }
 
     func resetAll() {
+        lastLang = nil
         word = []
         lastWord = nil
         pendingUndo = nil
@@ -189,12 +192,13 @@ final class KeyboardEngine {
         if !excluded && Settings.autoSwitch {
             for alt in layouts.alternates(for: cur) {
             let other = alt.text(strokes)
-            if Detector.shouldSwitch(cur: typed, curLang: cur.lang, alt: other, altLang: alt.lang) {
+            if Detector.shouldSwitch(cur: typed, curLang: cur.lang, alt: other, altLang: alt.lang, context: lastLang) {
+                lastLang = alt.lang
                 TextInjector.replace(deleting: typed.count, with: other + boundary)
                 layouts.select(alt)
                 Stats.bump("switch")
                 pendingUndo = Undo(original: typed, replaced: other, boundary: boundary, fromLayout: cur, strokes: strokes)
-                lastWord = LastWord(strokes: strokes, shown: other, layout: alt, boundary: boundary)
+                lastWord = LastWord(strokes: strokes, shown: other, layout: alt, boundary: boundary, byKeyla: true)
                 sentence = String(sentence.dropLast(typed.count)) + other + boundary
                 DispatchQueue.main.async { HUD.shared.show("\(typed) → \(other)", "⌫ — отменить", badge: alt.short) }
                 return true
@@ -203,6 +207,7 @@ final class KeyboardEngine {
         }
         lastWord = LastWord(strokes: strokes, shown: typed, layout: cur, boundary: boundary)
         sentence += boundary
+        if Detector.core(typed).count >= 2 { lastLang = cur.lang }
 
         guard !excluded else { return false }
         let core = Detector.core(typed)
@@ -231,6 +236,7 @@ final class KeyboardEngine {
         if Settings.grammarHints, let last = typed.last, ".!?".contains(last) {
             let s = sentence.trimmingCharacters(in: .whitespaces)
             sentence = ""
+            lastLang = nil
             if s.split(separator: " ").count >= 3, let hint = Spell.grammarHint(s, cur.lang) {
                 DispatchQueue.main.async { HUD.shared.show("Грамматика", hint, badge: "¶", duration: 3.5) }
             }
@@ -255,6 +261,7 @@ final class KeyboardEngine {
 
         if !word.isEmpty, let alt = layouts.alternate(for: cur) {             // word in progress
             let shown = cur.text(word), other = alt.text(word)
+            Settings.learnSwitch(Detector.core(shown))
             TextInjector.replace(deleting: shown.count, with: other)
             layouts.select(alt)
             HUD.shared.show("\(shown) → \(other)", badge: alt.short)
@@ -262,9 +269,11 @@ final class KeyboardEngine {
         }
         if let lw = lastWord, let target = layouts.alternate(for: lw.layout) { // just-finished word
             let other = target.text(lw.strokes)
+            if lw.byKeyla { Settings.addException(Detector.core(other)) }   // undoing Keyla's switch
+            else { Settings.learnSwitch(Detector.core(lw.shown)) }          // user's own fix → remember it
             TextInjector.replace(deleting: lw.shown.count + lw.boundary.count, with: other + lw.boundary)
             layouts.select(target)
-            lastWord = LastWord(strokes: lw.strokes, shown: other, layout: target, boundary: lw.boundary)
+            lastWord = LastWord(strokes: lw.strokes, shown: other, layout: target, boundary: lw.boundary, byKeyla: true)
             HUD.shared.show("\(lw.shown) → \(other)", badge: target.short)
             return
         }

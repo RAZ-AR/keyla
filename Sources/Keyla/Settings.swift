@@ -30,6 +30,10 @@ enum Settings {
             "voiceLanguage": "layout",           // layout | auto | en | ru | ...
             "voiceCleanup": false,
             "pushToTalk": true,
+            "launchAtLogin": true,
+            "perAppLayout": true,
+            "onboarded": false,
+            "learnedSwitch": "",
         ])
     }
 
@@ -41,6 +45,23 @@ enum Settings {
     static var showHUD: Bool { d.bool(forKey: "showHUD") }
     static var indicatorStyle: String { d.string(forKey: "indicatorStyle") ?? "mark" }
     static var pushToTalk: Bool { d.bool(forKey: "pushToTalk") }
+    static var perAppLayout: Bool { d.bool(forKey: "perAppLayout") }
+
+    /// Words the user converted by hand (double Shift) — always switch them next time.
+    static var learnedSwitch: Set<String> { Set(lines("learnedSwitch").map { $0.lowercased() }) }
+    static func learnSwitch(_ word: String) {
+        let w = word.lowercased()
+        guard w.count >= 2, !learnedSwitch.contains(w) else { return }
+        d.set((lines("learnedSwitch") + [w]).joined(separator: "\n"), forKey: "learnedSwitch")
+        // A word can't be both "always switch" and "never switch".
+        d.set(lines("exceptions").filter { $0.lowercased() != w }.joined(separator: "\n"), forKey: "exceptions")
+    }
+
+    /// Remembered layout per app (bundle id → input source id).
+    static var appLayouts: [String: String] {
+        get { d.dictionary(forKey: "appLayouts") as? [String: String] ?? [:] }
+        set { d.set(newValue, forKey: "appLayouts") }
+    }
 
     static func lines(_ key: String) -> [String] {
         (d.string(forKey: key) ?? "").split(whereSeparator: \.isNewline)
@@ -54,6 +75,7 @@ enum Settings {
         let w = word.lowercased()
         guard !w.isEmpty, !exceptions.contains(w) else { return }
         d.set((lines("exceptions") + [w]).joined(separator: "\n"), forKey: "exceptions")
+        d.set(lines("learnedSwitch").filter { $0.lowercased() != w }.joined(separator: "\n"), forKey: "learnedSwitch")
     }
 
     static var llmProvider: String { d.string(forKey: "llmProvider") ?? "anthropic" }

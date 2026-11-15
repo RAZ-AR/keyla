@@ -84,10 +84,18 @@ private struct GeneralTab: View {
     @AppStorage("indicatorStyle") var indicatorStyle = "mark"
     @AppStorage("excludedApps") var excludedApps = ""
     @AppStorage("pairedLayouts") var paired = ""
+    @AppStorage("perAppLayout") var perApp = true
+    @AppStorage("launchAtLogin") var launchAtLogin = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Toggle("Переключать раскладку автоматически", isOn: $autoSwitch).toggleStyle(CircleToggleStyle())
+            Rule()
+            Toggle("Помнить раскладку для каждого приложения", isOn: $perApp).toggleStyle(CircleToggleStyle())
+            Rule()
+            Toggle("Запускать при входе", isOn: Binding(
+                get: { LoginItem.isEnabled },
+                set: { LoginItem.set($0); launchAtLogin = $0 })).toggleStyle(CircleToggleStyle())
             Rule()
             Toggle("Двойной ⇧ — перевести слово или выделение", isOn: $doubleShift).toggleStyle(CircleToggleStyle())
             Rule()
@@ -103,7 +111,9 @@ private struct GeneralTab: View {
                 Button("+ \(id)") { excludedApps += (excludedApps.isEmpty ? "" : "\n") + id }
                     .buttonStyle(TextLinkStyle())
             }
-            Note(text: "⌫ сразу после исправления отменяет его и запоминает слово.")
+            Note(text: "⌫ сразу после исправления отменяет его и запоминает слово. Двойной ⇧ на слове, которое Keyla пропустила, — и она выучит его.")
+            Button("Показать приветствие") { OnboardingController.shared.show() }
+                .buttonStyle(TextLinkStyle()).padding(.top, K.s2)
         }
     }
 
@@ -122,6 +132,7 @@ private struct SpellingTab: View {
     @AppStorage("autocorrect") var autocorrect = false
     @AppStorage("grammarHints") var grammarHints = true
     @AppStorage("exceptions") var exceptions = ""
+    @AppStorage("learnedSwitch") var learned = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -132,6 +143,7 @@ private struct SpellingTab: View {
             Toggle("Проверять грамматику предложений", isOn: $grammarHints).toggleStyle(CircleToggleStyle())
             Rule()
             LineEditor(title: "Исключения — не переключать и не исправлять", text: $exceptions)
+            LineEditor(title: "Выученные слова — переключать всегда", text: $learned)
             Note(text: "Словари — системные macOS, работают офлайн. ⌃⌥G на выделенном тексте открывает помощника письма.")
         }
     }

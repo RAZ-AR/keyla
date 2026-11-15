@@ -18,8 +18,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleExecutable</key><string>Keyla</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>0.1.0</string>
-  <key>CFBundleVersion</key><string>1</string>
+  <key>CFBundleShortVersionString</key><string>0.2.0</string>
+  <key>CFBundleVersion</key><string>2</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>LSUIElement</key><true/>
   <key>NSMicrophoneUsageDescription</key><string>Keyla записывает голос только пока вы диктуете.</string>
@@ -28,6 +28,9 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 PLIST
 # Stable local identity keeps macOS privacy permissions across rebuilds; falls back to ad-hoc.
 ID=$(security find-identity -p codesigning 2>/dev/null | awk '/"Keyla Local Signing"/{print $2; exit}')
+if [[ -z "$ID" ]]; then
+  echo "⚠️  Certificate 'Keyla Local Signing' not found — signing ad-hoc. macOS will ask for permissions again." >&2
+fi
 codesign --force --deep --sign "${ID:--}" "$APP"
 echo "Built $(pwd)/$APP"
 if [[ "${1:-}" == "--install" ]]; then

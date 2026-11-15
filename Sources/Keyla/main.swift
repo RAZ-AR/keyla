@@ -27,6 +27,15 @@ enum SelfTest {
             if !ok { fails += 1 }
             print(ok ? "✅" : "❌", typed, "→", got ? other : "(оставить)")
         }
+        // Context: inside a Russian sentence, a borderline unknown word leans Russian.
+        let ctx = [("ghbdtnbr", en, ru)]   // "приветик" — not in the dictionary
+        for (typed, from, to) in ctx {
+            let other = KeyLayout.convert(typed, from: from, to: to)
+            let without = Detector.shouldSwitch(cur: typed, curLang: from.lang, alt: other, altLang: to.lang)
+            let with = Detector.shouldSwitch(cur: typed, curLang: from.lang, alt: other, altLang: to.lang, context: to.lang)
+            print(with ? "✅" : "❌", "контекст:", typed, "→", other, "| без контекста:", without, "с контекстом:", with)
+            if !with { fails += 1 }
+        }
         print("Опечатка 'recieve' →", Spell.correction("recieve", "en") ?? "-", "| 'превет' →", Spell.guesses("превет", "ru").prefix(3))
         let (fixed, notes) = Spell.localFix("I has a apple and i recieve it yesterday.")
         print("Офлайн-исправление:", fixed, notes)
