@@ -85,11 +85,16 @@ private struct GeneralTab: View {
     @AppStorage("excludedApps") var excludedApps = ""
     @AppStorage("pairedLayouts") var paired = ""
     @AppStorage("perAppLayout") var perApp = true
+    @AppStorage("instantSwitch") var instant = true
     @AppStorage("launchAtLogin") var launchAtLogin = true
+    @AppStorage("autoUpdateCheck") var autoUpdate = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Toggle("Переключать раскладку автоматически", isOn: $autoSwitch).toggleStyle(CircleToggleStyle())
+            Rule()
+            Toggle("Сразу при наборе, не дожидаясь пробела", isOn: $instant).toggleStyle(CircleToggleStyle())
+                .disabled(!autoSwitch)
             Rule()
             Toggle("Помнить раскладку для каждого приложения", isOn: $perApp).toggleStyle(CircleToggleStyle())
             Rule()
@@ -114,6 +119,13 @@ private struct GeneralTab: View {
             Note(text: "⌫ сразу после исправления отменяет его и запоминает слово. Двойной ⇧ на слове, которое Keyla пропустила, — и она выучит его.")
             Button("Показать приветствие") { OnboardingController.shared.show() }
                 .buttonStyle(TextLinkStyle()).padding(.top, K.s2)
+            Rule().padding(.top, K.s3)
+            Toggle("Проверять обновления автоматически", isOn: $autoUpdate).toggleStyle(CircleToggleStyle())
+            HStack {
+                Text("Версия \(Updater.currentVersion)").font(K.text(13)).foregroundStyle(K.muted)
+                Spacer()
+                Button("Проверить сейчас") { Updater.shared.check(manual: true) }.buttonStyle(TextLinkStyle())
+            }
         }
     }
 
@@ -130,6 +142,7 @@ private struct GeneralTab: View {
 private struct SpellingTab: View {
     @AppStorage("spellHints") var spellHints = true
     @AppStorage("autocorrect") var autocorrect = false
+    @AppStorage("inlineMarks") var inline = true
     @AppStorage("grammarHints") var grammarHints = true
     @AppStorage("exceptions") var exceptions = ""
     @AppStorage("learnedSwitch") var learned = ""
@@ -138,19 +151,22 @@ private struct SpellingTab: View {
         VStack(alignment: .leading, spacing: 0) {
             Toggle("Показывать слова с ошибками", isOn: $spellHints).toggleStyle(CircleToggleStyle())
             Rule()
+            Toggle("Подчёркивать ошибки прямо в тексте", isOn: $inline).toggleStyle(CircleToggleStyle())
+                .disabled(!spellHints)
+            Rule()
             Toggle("Исправлять опечатки автоматически", isOn: $autocorrect).toggleStyle(CircleToggleStyle())
             Rule()
             Toggle("Проверять грамматику предложений", isOn: $grammarHints).toggleStyle(CircleToggleStyle())
             Rule()
             LineEditor(title: "Исключения — не переключать и не исправлять", text: $exceptions)
             LineEditor(title: "Выученные слова — переключать всегда", text: $learned)
-            Note(text: "Словари — системные macOS, работают офлайн. ⌃⌥G на выделенном тексте открывает помощника письма.")
+            Note(text: "Словари — системные macOS, работают офлайн. Нажмите на подчёркнутое слово — появятся варианты. ⌃⌥G на выделенном тексте открывает помощника письма.")
         }
     }
 }
 
 private struct AITab: View {
-    @AppStorage("llmProvider") var provider = "anthropic"
+    @AppStorage("llmProvider") var provider = "apple"
     @AppStorage("anthropicModel") var model = "claude-opus-5-5"
     @AppStorage("anthropicEffort") var effort = "low"
     @AppStorage("openaiBaseURL") var baseURL = "http://localhost:11434/v1"
@@ -159,9 +175,16 @@ private struct AITab: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             OptionRow(title: "Модель для письма", value: $provider,
-                      options: [("Claude", "anthropic"), ("Своя: Ollama, LM Studio, OpenRouter", "openai")])
+                      options: [("Apple, на устройстве", "apple"), ("Claude", "anthropic"), ("Своя: Ollama, LM Studio", "openai")])
             Rule()
-            if provider == "anthropic" {
+            if provider == "apple" {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Apple Intelligence").font(K.text(15, .bold)).foregroundStyle(K.ink)
+                    Text(AppleModel.status).font(K.text(13)).foregroundStyle(K.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.vertical, K.s3)
+            } else if provider == "anthropic" {
                 LineField(title: "API-ключ Anthropic", text: keychainBinding("anthropic"), secure: true, placeholder: "sk-ant-…")
                 OptionRow(title: "Модель", value: $model,
                           options: [("Opus 5.5 — качество", "claude-opus-5-5"), ("Sonnet 5.5 — баланс", "claude-sonnet-5-5"),
@@ -173,7 +196,9 @@ private struct AITab: View {
                 LineField(title: "Модель", text: $oaModel)
                 LineField(title: "API-ключ, если нужен", text: keychainBinding("openai"), secure: true)
             }
-            Note(text: "Ключи хранятся в Связке ключей. Без модели «Исправить» работает офлайн через словари macOS.")
+            Note(text: provider == "apple"
+                 ? "Текст не покидает Mac. Для длинных и сложных текстов лучше подходит Claude."
+                 : "Ключи хранятся в Связке ключей. Если ключ не задан, Keyla использует модель Apple на устройстве.")
         }
     }
 }

@@ -25,6 +25,13 @@ enum Spell {
                                              in: w, language: sl, inSpellDocumentWithTag: 0) ?? []
     }
 
+    /// Dictionary words that start with `prefix` (empty = no word in this language starts like that).
+    static func completions(_ prefix: String, _ l: String) -> [String] {
+        guard let sl = lang(l) else { return [] }
+        return NSSpellChecker.shared.completions(forPartialWordRange: NSRange(location: 0, length: (prefix as NSString).length),
+                                                 in: prefix, language: sl, inSpellDocumentWithTag: 0) ?? []
+    }
+
     static func correction(_ w: String, _ l: String) -> String? {
         guard let sl = lang(l) else { return nil }
         return NSSpellChecker.shared.correction(forWordRange: NSRange(location: 0, length: (w as NSString).length),
@@ -90,9 +97,10 @@ enum Detector {
 
     /// Decide whether `cur` (what appeared on screen) was really meant as `alt` (same keys, other layout).
     /// `context` is the language of the previous word in this sentence, if known.
-    static func shouldSwitch(cur: String, curLang: String, alt: String, altLang: String, context: String? = nil) -> Bool {
+    /// `streak` — how many words in a row were already in `context`.
+    static func shouldSwitch(cur: String, curLang: String, alt: String, altLang: String, context: String? = nil, streak: Int = 1) -> Bool {
         let c = core(cur), a = core(alt)
-        guard a.count >= 2, c.count >= 1 else { return false }
+        guard a.count >= 1, c.count >= 1 else { return false }
         if Settings.exceptions.contains(cur.lowercased()) || Settings.exceptions.contains(c.lowercased()) { return false }
         if Settings.learnedSwitch.contains(c.lowercased()) { return true }
         if cur.contains(where: { $0.isNumber }) { return false }
@@ -100,15 +108,58 @@ enum Detector {
         // Inner punctuation (e.g. "ghbdtn,rfr") — not a single word in the other layout either; keep it simple.
         if a.contains(where: { !$0.isLetter && $0 != "-" && $0 != "'" && $0 != "’" }) { return false }
 
+        let inContext = context == altLang
+        // Short words ("yt" → «не», "z" → «я»): the dictionary knows too many abbreviations, so use word lists.
+        if a.count <= 3 {
+            let al = a.lowercased(), cl = c.lowercased()
+            if common[curLang]?.contains(cl) == true { return false }
+            if common[altLang]?.contains(al) == true {
+                if a.count == 1 { return inContext }               // single letters only inside a sentence
+                return inContext || !Spell.isValid(c, curLang)
+            }
+            if a.count < 2 { return false }
+        }
+
         if Spell.isValid(c, curLang) { return false }
         if Spell.isValid(a, altLang) { return true }
-        guard a.count >= (context == altLang ? 3 : 4) else { return false }
+        guard a.count >= (inContext ? 3 : 4) else { return false }
         // Both unknown: if the current word is one typo away from a real word, it's a typo, not a layout mistake.
         if Spell.guesses(c, curLang).contains(where: { levenshtein($0.lowercased(), c.lowercased()) <= 1 }) { return false }
         // The sentence is already in the other language: a smaller lead is enough.
-        let margin = context == altLang ? 0.15 : 0.6
+        let margin = inContext ? (streak >= 2 ? 0.0 : 0.15) : 0.6
         return plausibility(a, altLang) - plausibility(c, curLang) > margin
     }
+
+    /// Mid-word check, as you type: no word in the current language starts like this, but plenty do in the other.
+    /// "ghb" → «при» switches on the third key instead of waiting for the space.
+    static func shouldSwitchPrefix(cur: String, curLang: String, alt: String, altLang: String) -> Bool {
+        guard cur.count >= 3, cur.count <= 6, alt.count == cur.count,
+              cur.allSatisfy({ $0.isLetter }), alt.allSatisfy({ $0.isLetter }) else { return false }
+        // Identifiers like "iOS", "McD": leave mixed case alone.
+        if cur.dropFirst().contains(where: { $0.isUppercase }) && cur != cur.uppercased() { return false }
+        let c = cur.lowercased()
+        if Settings.exceptions.contains(where: { $0.hasPrefix(c) || ($0.count >= 3 && c.hasPrefix($0)) }) { return false }
+        guard Spell.completions(c, curLang).isEmpty else { return false }
+        guard Spell.completions(alt.lowercased(), altLang).count >= 3 else { return false }
+        return plausibility(alt, altLang) >= plausibility(cur, curLang) - 0.2
+    }
+
+    /// The most frequent short words. Used only for 1–3 letter words, where dictionaries are unreliable.
+    static let common: [String: Set<String>] = [
+        "ru": Set(["я", "и", "в", "к", "с", "у", "о", "а", "не", "на", "но", "по", "за", "из", "то", "от", "до", "же", "бы",
+                   "ли", "мы", "вы", "он", "ты", "да", "нет", "как", "что", "это", "так", "все", "всё", "уже", "или", "еще",
+                   "ещё", "кто", "где", "его", "её", "мне", "там", "тут", "вот", "был", "она", "они", "оно", "нас", "вас",
+                   "для", "при", "без", "под", "над", "про", "тоже", "чем", "кем", "мой", "моя", "наш", "ваш", "раз", "два",
+                   "три", "сам", "том", "тем", "чем", "ну", "ок", "во", "со", "ко", "об", "ей", "им", "их", "ни", "лишь"]),
+        "uk": Set(["я", "і", "й", "в", "у", "з", "і", "а", "не", "на", "але", "що", "це", "так", "як", "ти", "ми", "ви",
+                   "він", "вона", "для", "від", "до", "та", "чи", "вже", "ще", "де", "хто", "мені"]),
+        "en": Set(["a", "i", "is", "it", "in", "on", "at", "to", "of", "be", "we", "he", "me", "my", "an", "or", "if", "so",
+                   "do", "go", "no", "up", "us", "am", "by", "as", "ok", "hi", "the", "and", "for", "you", "are",
+                   "not", "but", "can", "was", "has", "had", "his", "her", "its", "our", "who", "how", "why", "yes", "all",
+                   "any", "one", "two", "new", "now", "see", "get", "got", "let", "may", "own", "say", "she", "too", "use",
+                   "way", "day", "man", "did", "off", "out", "app", "api", "url", "pdf", "faq", "etc", "ios", "mac", "ux", "ui",
+                   "ai", "id", "pm", "tv", "pc", "eu", "uk", "usa", "lol", "omg", "btw", "cv", "hr", "qa"]),
+    ]
 
     private static let vowels: [String: Set<Character>] = [
         "en": Set("aeiouy"), "ru": Set("аеёиоуыэюя"), "uk": Set("аеєиіїоуюя"), "be": Set("аеёіоуыэюя"),

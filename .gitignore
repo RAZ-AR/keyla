@@ -4,3 +4,4 @@ Keyla.app/
 dist/
 *.dmg
 .DS_Store
+Keyla *.app/

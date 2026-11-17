@@ -11,6 +11,9 @@ final class MenuModel: ObservableObject {
     @Published var secureInput = false
     @Published var secureOwner: String?
     @Published var secureIsGlitch = false
+    @Published var secureStillStuck = false   // lock + unlock didn't help
+    @Published var updateVersion: String?
+    @Published var updateBusy = false
     @Published var recording = false
     @Published var switchesToday = 0
 
@@ -27,6 +30,7 @@ struct MenuActions {
     var settings: () -> Void = {}
     var quit: () -> Void = {}
     var lockScreen: () -> Void = {}
+    var installUpdate: () -> Void = {}
 }
 
 /// Row button: full-width hit area, subtle ink wash when pressed.
@@ -126,6 +130,10 @@ struct MenuPanelView: View {
     }
 
     @ViewBuilder private var warnings: some View {
+        if let v = model.updateVersion {
+            banner(model.updateBusy ? "Обновляю Keyla до \(v)…" : "Доступна Keyla \(v) — обновить",
+                   action: model.updateBusy ? nil : actions.installUpdate)
+        }
         if model.missingAccessibility {
             banner("Включите Keyla в «Универсальном доступе»", action: actions.openAccessibility)
         }
@@ -133,7 +141,10 @@ struct MenuPanelView: View {
             banner("Включите Keyla в «Мониторинге ввода»", action: actions.openInputMonitoring)
         }
         if model.secureInput {
-            if model.secureIsGlitch || model.secureOwner == nil {
+            if model.secureStillStuck {
+                banner("Блокировка экрана не помогла: macOS держит «Защищённый ввод». Выйдите из учётной записи и войдите снова или перезагрузите Mac.",
+                       action: nil)
+            } else if model.secureIsGlitch || model.secureOwner == nil {
                 // macOS glitch: loginwindow kept Secure Input. Lock + unlock releases it.
                 banner("macOS завис в «Защищённом вводе» — Keyla не видит клавиши. Нажмите: экран заблокируется, после разблокировки всё заработает.",
                        action: actions.lockScreen)

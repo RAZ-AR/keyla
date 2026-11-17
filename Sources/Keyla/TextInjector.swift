@@ -89,6 +89,40 @@ enum AX {
         return v as? String
     }
 
+    static func selectedRange(_ el: AXUIElement) -> CFRange? {
+        var v: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(el, kAXSelectedTextRangeAttribute as CFString, &v) == .success, let v else { return nil }
+        var r = CFRange()
+        return AXValueGetValue(v as! AXValue, .cfRange, &r) ? r : nil
+    }
+
+    static func select(_ el: AXUIElement, _ range: CFRange) {
+        var r = range
+        guard let v = AXValueCreate(.cfRange, &r) else { return }
+        AXUIElementSetAttributeValue(el, kAXSelectedTextRangeAttribute as CFString, v)
+    }
+
+    static func string(_ el: AXUIElement, _ range: CFRange) -> String? {
+        var r = range
+        guard let rv = AXValueCreate(.cfRange, &r) else { return nil }
+        var out: CFTypeRef?
+        guard AXUIElementCopyParameterizedAttributeValue(el, kAXStringForRangeParameterizedAttribute as CFString, rv, &out) == .success
+        else { return nil }
+        return out as? String
+    }
+
+    /// Bounds of a text range, global top-left coordinates.
+    static func bounds(_ el: AXUIElement, _ range: CFRange) -> CGRect? {
+        var r = range
+        guard let rv = AXValueCreate(.cfRange, &r) else { return nil }
+        var out: CFTypeRef?
+        guard AXUIElementCopyParameterizedAttributeValue(el, kAXBoundsForRangeParameterizedAttribute as CFString, rv, &out) == .success,
+              let out else { return nil }
+        var rect = CGRect.zero
+        guard AXValueGetValue(out as! AXValue, .cgRect, &rect), rect.origin != .zero else { return nil }
+        return rect
+    }
+
     static func isSecureField() -> Bool {
         guard let el = focused() else { return false }
         var v: CFTypeRef?

@@ -9,6 +9,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var retryTimer: Timer?
     private var secureInputOn = false
     private let menuPanel = MenuPanelController()
+    private var secureStillStuck = false
 
     func applicationDidFinishLaunching(_ note: Notification) {
         Settings.registerDefaults()
@@ -27,7 +28,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             voice: { [weak self] in self?.menuPanel.close(); VoiceController.shared.toggle() },
             settings: { [weak self] in self?.menuPanel.close(); self?.openSettings() },
             quit: { NSApp.terminate(nil) },
-            lockScreen: { [weak self] in self?.menuPanel.close(); SecureInput.lockScreen() })
+            lockScreen: { [weak self] in self?.menuPanel.close(); SecureInput.lockScreen() },
+            installUpdate: { Updater.shared.install() })
+        Updater.shared.onChange = { [weak self] in self?.refreshPanel() }
+        Updater.shared.startAutomaticChecks()
+        // After the user unlocks, see whether the lock actually cleared the Secure Input glitch.
+        DistributedNotificationCenter.default().addObserver(
+            forName: NSNotification.Name("com.apple.screenIsUnlocked"), object: nil, queue: .main) { [weak self] _ in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                guard let self else { return }
+                self.secureInputOn = SecureInput.isOn
+                if SecureInput.lockRequestedAt != nil {
+                    self.secureStillStuck = SecureInput.owner()?.isSystemGlitch == true
+                    if !self.secureInputOn { HUD.shared.show("Keyla снова видит клавиши", force: true) }
+                }
+                self.updateIndicator()
+            }
+        }
         updateIndicator()
 
         DistributedNotificationCenter.default().addObserver(
@@ -128,6 +145,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let owner = secureInputOn ? SecureInput.owner() : nil
         m.secureOwner = owner?.name
         m.secureIsGlitch = owner?.isSystemGlitch ?? false
+        if !secureInputOn { secureStillStuck = false; SecureInput.lockRequestedAt = nil }
+        m.secureStillStuck = secureStillStuck
+        m.updateVersion = Updater.shared.available?.version
+        m.updateBusy = Updater.shared.state == .downloading || Updater.shared.state == .installing
         m.recording = VoiceController.shared.isRecording
         m.switchesToday = UserDefaults.standard.integer(forKey: Stats.key("switch"))
     }

@@ -29,8 +29,19 @@ enum SecureInput {
         return String(cString: buf)
     }
 
-    /// Locks the screen (same as ⌃⌘Q). After unlocking, loginwindow normally releases Secure Input.
+    /// When the user last asked Keyla to lock the screen to clear the glitch.
+    static var lockRequestedAt: Date?
+
+    /// Locks the screen. After unlocking, loginwindow normally releases Secure Input.
     static func lockScreen() {
-        TextInjector.key(12, flags: [.maskCommand, .maskControl])
+        lockRequestedAt = Date()
+        // System lock call (what the Control Center lock uses); falls back to the ⌃⌘Q shortcut.
+        typealias LockFn = @convention(c) () -> Int32
+        if let h = dlopen("/System/Library/PrivateFrameworks/login.framework/Versions/Current/login", RTLD_LAZY),
+           let sym = dlsym(h, "SACLockScreenImmediate") {
+            _ = unsafeBitCast(sym, to: LockFn.self)()
+        } else {
+            TextInjector.key(12, flags: [.maskCommand, .maskControl])
+        }
     }
 }

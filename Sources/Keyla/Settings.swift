@@ -17,7 +17,6 @@ enum Settings {
             "excludedApps": "com.apple.Terminal\ncom.googlecode.iterm2\ndev.warp.Warp-Stable",
             "exceptions": "",
             "pairedLayouts": "",
-            "llmProvider": "anthropic",          // anthropic | openai
             "anthropicModel": "claude-opus-5-5",
             "anthropicEffort": "low",
             "openaiBaseURL": "http://localhost:11434/v1",
@@ -31,9 +30,13 @@ enum Settings {
             "voiceCleanup": false,
             "pushToTalk": true,
             "launchAtLogin": true,
+            "autoUpdateCheck": true,
             "perAppLayout": true,
             "onboarded": false,
             "learnedSwitch": "",
+            "instantSwitch": true,
+            "inlineMarks": true,
+            "llmProvider": Keychain.get("anthropic")?.isEmpty == false ? "anthropic" : "apple",
         ])
     }
 
@@ -46,6 +49,8 @@ enum Settings {
     static var indicatorStyle: String { d.string(forKey: "indicatorStyle") ?? "mark" }
     static var pushToTalk: Bool { d.bool(forKey: "pushToTalk") }
     static var perAppLayout: Bool { d.bool(forKey: "perAppLayout") }
+    static var instantSwitch: Bool { d.bool(forKey: "instantSwitch") }
+    static var inlineMarks: Bool { d.bool(forKey: "inlineMarks") }
 
     /// Words the user converted by hand (double Shift) — always switch them next time.
     static var learnedSwitch: Set<String> { Set(lines("learnedSwitch").map { $0.lowercased() }) }
@@ -78,7 +83,7 @@ enum Settings {
         d.set(lines("learnedSwitch").filter { $0.lowercased() != w }.joined(separator: "\n"), forKey: "learnedSwitch")
     }
 
-    static var llmProvider: String { d.string(forKey: "llmProvider") ?? "anthropic" }
+    static var llmProvider: String { d.string(forKey: "llmProvider") ?? "apple" }   // apple | anthropic | openai
     static var anthropicModel: String { d.string(forKey: "anthropicModel") ?? "claude-opus-5-5" }
     static var anthropicEffort: String { d.string(forKey: "anthropicEffort") ?? "low" }
     static var openaiBaseURL: String { d.string(forKey: "openaiBaseURL") ?? "" }

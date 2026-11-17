@@ -32,7 +32,15 @@ final class KeyboardEngine {
     /// `byKeyla`: the shown text is Keyla's conversion, so converting it back means "that was wrong".
     private struct LastWord { let strokes: [Stroke]; let shown: String; let layout: KeyLayout; let boundary: String; var byKeyla = false }
 
-    private var word: [Stroke] = []
+    private var word: [Stroke] = [] { didSet { if word.isEmpty { midSwitch = nil; vetoWord = false } } }
+    /// The user undid a switch inside this word — leave it alone until it ends.
+    private var vetoWord = false
+    /// Set when the current word was switched while typing: (original layout, what was on screen).
+    private var midSwitch: (from: KeyLayout, typed: String)?
+    /// A one-letter word right before the current one ("z" before "ghbdtn") — fixed together with it.
+    private struct Single { let strokes: [Stroke]; let shown: String; let layout: KeyLayout; let boundary: String }
+    private var prevSingle: Single?
+    private var langStreak = 0
     private var lastWord: LastWord?
     private var pendingUndo: Undo?
     private var sentence = ""
@@ -48,7 +56,7 @@ final class KeyboardEngine {
 
     func start() -> Bool {
         if tap != nil { return true }
-        let types: [CGEventType] = [.keyDown, .flagsChanged, .leftMouseDown, .rightMouseDown]
+        let types: [CGEventType] = [.keyDown, .flagsChanged, .leftMouseDown, .rightMouseDown, .scrollWheel]
         let mask = types.reduce(CGEventMask(0)) { $0 | (1 << CGEventMask($1.rawValue)) }
         guard let t = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap,
                                         eventsOfInterest: mask, callback: tapCallback,
@@ -72,6 +80,8 @@ final class KeyboardEngine {
 
     func resetAll() {
         lastLang = nil
+        langStreak = 0
+        prevSingle = nil
         word = []
         lastWord = nil
         pendingUndo = nil
@@ -89,7 +99,14 @@ final class KeyboardEngine {
         switch type {
         case .keyDown: return keyDown(event)
         case .flagsChanged: flagsChanged(event); return false
-        default: resetAll(); return false   // mouse click: caret moved
+        case .scrollWheel:
+            DispatchQueue.main.async { InlineMarks.shared.clear() }
+            return false
+        default:                            // mouse click: caret moved
+            let p = event.location
+            DispatchQueue.main.async { InlineMarks.shared.mouseDown(at: p) }
+            resetAll()
+            return false
         }
     }
 
@@ -113,8 +130,9 @@ final class KeyboardEngine {
                 undo(u)
                 return true
             }
-            if !word.isEmpty { word.removeLast() } else { lastWord = nil }
+            if !word.isEmpty { word.removeLast() } else { lastWord = nil; prevSingle = nil }
             if !sentence.isEmpty { sentence.removeLast() }
+            DispatchQueue.main.async { InlineMarks.shared.caretMovedBack() }
             return false
         }
         pendingUndo = nil
@@ -124,10 +142,12 @@ final class KeyboardEngine {
         switch kc {
         case 49: return wordEnded(boundary: " ")
         case 36, 76, 48: // Return / Enter / Tab: never rewrite — the text may already be sent
-            word = []; lastWord = nil; sentence = ""
+            word = []; lastWord = nil; sentence = ""; prevSingle = nil
+            DispatchQueue.main.async { InlineMarks.shared.clear() }
             return false
         case 53, 115, 116, 117, 119, 121, 123, 124, 125, 126:
             resetAll()
+            DispatchQueue.main.async { InlineMarks.shared.clear() }
             return false
         default:
             guard let cur = layouts.current, cur.hasKey(kc) else { word = []; lastWord = nil; return false }
@@ -136,8 +156,44 @@ final class KeyboardEngine {
             word.append(s)
             sentence += cur.char(s)
             if sentence.count > 600 { sentence = String(sentence.suffix(300)) }
+            if Settings.autoSwitch && Settings.instantSwitch && midSwitch == nil && (3...6).contains(word.count) {
+                let n = word.count
+                DispatchQueue.main.async { self.tryInstant(expect: n) }
+            }
             return false
         }
+    }
+
+    // MARK: Instant switch while typing
+
+    private func tryInstant(expect n: Int) {
+        guard word.count == n, midSwitch == nil, !vetoWord, let cur = layouts.current, !frontAppExcluded, !AX.isSecureField() else { return }
+        let typed = cur.text(word)
+        for alt in layouts.alternates(for: cur) {
+            let other = alt.text(word)
+            guard Detector.shouldSwitchPrefix(cur: typed, curLang: cur.lang, alt: other, altLang: alt.lang) else { continue }
+            let (extra, lead) = retroSingle(cur: cur, alt: alt)
+            TextInjector.replace(deleting: typed.count + extra, with: lead + other)
+            layouts.select(alt)
+            midSwitch = (cur, typed)
+            Stats.bump("switch")
+            pendingUndo = Undo(original: typed, replaced: other, boundary: "", fromLayout: cur, strokes: word)
+            sentence = String(sentence.dropLast(typed.count)) + other
+            HUD.shared.show("\(typed) → \(other)…", "⌫ — отменить", badge: alt.short)
+            return
+        }
+    }
+
+    /// If the word before was a lone letter typed in the same wrong layout ("z" → «я»), fix it too.
+    /// Returns how many extra characters to delete and the text to put before the current word.
+    private func retroSingle(cur: KeyLayout, alt: KeyLayout) -> (Int, String) {
+        defer { prevSingle = nil }
+        guard let p = prevSingle, p.layout.id == cur.id else { return (0, "") }
+        let a = alt.text(p.strokes)
+        guard Detector.common[alt.lang]?.contains(a.lowercased()) == true,
+              Detector.common[cur.lang]?.contains(p.shown.lowercased()) != true,
+              !Settings.exceptions.contains(p.shown.lowercased()) else { return (0, "") }
+        return (p.shown.count + p.boundary.count, a + p.boundary)
     }
 
     private func flagsChanged(_ event: CGEvent) {
@@ -180,6 +236,7 @@ final class KeyboardEngine {
 
     private func wordEnded(boundary: String) -> Bool {
         let strokes = word
+        let vetoed = vetoWord, switchedWhileTyping = midSwitch != nil
         word = []
         guard !strokes.isEmpty, let cur = layouts.current else {
             lastWord = nil
@@ -189,12 +246,22 @@ final class KeyboardEngine {
         let typed = cur.text(strokes)
         let excluded = frontAppExcluded || AX.isSecureField()
 
-        if !excluded && Settings.autoSwitch {
+        if switchedWhileTyping {        // already switched while typing
+            bumpLang(cur.lang)
+            prevSingle = nil
+            lastWord = LastWord(strokes: strokes, shown: typed, layout: cur, boundary: boundary, byKeyla: true)
+            sentence += boundary
+            return false
+        }
+
+        if !excluded && Settings.autoSwitch && !vetoed {
             for alt in layouts.alternates(for: cur) {
             let other = alt.text(strokes)
-            if Detector.shouldSwitch(cur: typed, curLang: cur.lang, alt: other, altLang: alt.lang, context: lastLang) {
-                lastLang = alt.lang
-                TextInjector.replace(deleting: typed.count, with: other + boundary)
+            if Detector.shouldSwitch(cur: typed, curLang: cur.lang, alt: other, altLang: alt.lang,
+                                     context: lastLang, streak: langStreak) {
+                bumpLang(alt.lang)
+                let (extra, lead) = retroSingle(cur: cur, alt: alt)
+                TextInjector.replace(deleting: typed.count + extra, with: lead + other + boundary)
                 layouts.select(alt)
                 Stats.bump("switch")
                 pendingUndo = Undo(original: typed, replaced: other, boundary: boundary, fromLayout: cur, strokes: strokes)
@@ -207,7 +274,9 @@ final class KeyboardEngine {
         }
         lastWord = LastWord(strokes: strokes, shown: typed, layout: cur, boundary: boundary)
         sentence += boundary
-        if Detector.core(typed).count >= 2 { lastLang = cur.lang }
+        let coreLen = Detector.core(typed).count
+        prevSingle = coreLen == 1 && typed.count == 1 ? Single(strokes: strokes, shown: typed, layout: cur, boundary: boundary) : nil
+        if coreLen >= 2 { bumpLang(cur.lang) }
 
         guard !excluded else { return false }
         let core = Detector.core(typed)
@@ -226,8 +295,11 @@ final class KeyboardEngine {
             }
             if Settings.spellHints {
                 let g = Spell.guesses(core, cur.lang).prefix(3)
-                DispatchQueue.main.async {
-                    HUD.shared.show("\(core)?", g.isEmpty ? "Нет в словаре" : g.joined(separator: " · "), badge: "Aa", duration: 2.2)
+                let hud = { HUD.shared.show("\(core)?", g.isEmpty ? "Нет в словаре" : g.joined(separator: " · "), badge: "Aa", duration: 2.2) }
+                if Settings.inlineMarks {
+                    InlineMarks.shared.mark(core: core, typed: typed, boundary: boundary, lang: cur.lang, fallback: hud)
+                } else {
+                    DispatchQueue.main.async(execute: hud)
                 }
             }
         }
@@ -237,6 +309,7 @@ final class KeyboardEngine {
             let s = sentence.trimmingCharacters(in: .whitespaces)
             sentence = ""
             lastLang = nil
+            langStreak = 0
             if s.split(separator: " ").count >= 3, let hint = Spell.grammarHint(s, cur.lang) {
                 DispatchQueue.main.async { HUD.shared.show("Грамматика", hint, badge: "¶", duration: 3.5) }
             }
@@ -244,11 +317,18 @@ final class KeyboardEngine {
         return false
     }
 
+    private func bumpLang(_ l: String) {
+        langStreak = lastLang == l ? langStreak + 1 : 1
+        lastLang = l
+    }
+
     private func undo(_ u: Undo) {
         TextInjector.replace(deleting: u.replaced.count + u.boundary.count, with: u.original)
         if let from = u.fromLayout { layouts.select(from) }
         Settings.addException(u.original)     // don't touch this word again
         word = u.fromLayout != nil ? u.strokes : []
+        midSwitch = nil
+        vetoWord = u.boundary.isEmpty && u.fromLayout != nil
         lastWord = nil
         HUD.shared.show(u.original, "Запомнил — больше не трогаю", badge: "↩")
     }
@@ -261,7 +341,9 @@ final class KeyboardEngine {
 
         if !word.isEmpty, let alt = layouts.alternate(for: cur) {             // word in progress
             let shown = cur.text(word), other = alt.text(word)
-            Settings.learnSwitch(Detector.core(shown))
+            if let m = midSwitch { Settings.addException(m.typed) }          // undoing Keyla's instant switch
+            else { Settings.learnSwitch(Detector.core(shown)) }
+            midSwitch = nil
             TextInjector.replace(deleting: shown.count, with: other)
             layouts.select(alt)
             HUD.shared.show("\(shown) → \(other)", badge: alt.short)
