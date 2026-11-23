@@ -1,4 +1,4 @@
-import Foundation
+import Cocoa
 import Security
 
 /// UserDefaults-backed settings. SwiftUI views use @AppStorage with the same keys.
@@ -35,6 +35,8 @@ enum Settings {
             "onboarded": false,
             "learnedSwitch": "",
             "instantSwitch": true,
+            "askToLearn": true,
+            "declinedWords": "",
             "inlineMarks": true,
             "llmProvider": Keychain.get("anthropic")?.isEmpty == false ? "anthropic" : "apple",
         ])
@@ -51,6 +53,50 @@ enum Settings {
     static var perAppLayout: Bool { d.bool(forKey: "perAppLayout") }
     static var instantSwitch: Bool { d.bool(forKey: "instantSwitch") }
     static var inlineMarks: Bool { d.bool(forKey: "inlineMarks") }
+    static var askToLearn: Bool { d.bool(forKey: "askToLearn") }
+
+    // MARK: My words — the user's own vocabulary (Armenian in Latin/Cyrillic, slang, names…)
+
+    /// Words the user corrected back this session but hasn't confirmed: left alone until Keyla restarts.
+    static var sessionIgnored: Set<String> = []
+
+    /// Never switch, never correct, never underline.
+    static func isMine(_ word: String) -> Bool {
+        let w = word.lowercased()
+        return exceptions.contains(w) || sessionIgnored.contains(w)
+    }
+
+    static func remember(_ word: String) {
+        addException(word)
+        NSSpellChecker.shared.learnWord(word.lowercased())    // other apps stop underlining it too
+        unknownCounts[word.lowercased()] = nil
+    }
+
+    static var declined: Set<String> { Set(lines("declinedWords")) }
+    static func decline(_ word: String) {
+        let w = word.lowercased()
+        guard !declined.contains(w) else { return }
+        d.set((lines("declinedWords").suffix(300) + [w]).joined(separator: "\n"), forKey: "declinedWords")
+        unknownCounts[w] = nil
+    }
+
+    /// How many times each unknown word was typed and left as is.
+    static var unknownCounts: [String: Int] {
+        get { d.dictionary(forKey: "unknownCounts") as? [String: Int] ?? [:] }
+        set {
+            var v = newValue
+            if v.count > 500 { v = Dictionary(uniqueKeysWithValues: v.sorted { $0.value > $1.value }.prefix(300).map { ($0.key, $0.value) }) }
+            d.set(v, forKey: "unknownCounts")
+        }
+    }
+    /// Count one more use; returns the new total.
+    static func noteUnknown(_ word: String) -> Int {
+        let w = word.lowercased()
+        var c = unknownCounts
+        c[w, default: 0] += 1
+        unknownCounts = c
+        return c[w] ?? 1
+    }
 
     /// Words the user converted by hand (double Shift) — always switch them next time.
     static var learnedSwitch: Set<String> { Set(lines("learnedSwitch").map { $0.lowercased() }) }

@@ -101,7 +101,7 @@ enum Detector {
     static func shouldSwitch(cur: String, curLang: String, alt: String, altLang: String, context: String? = nil, streak: Int = 1) -> Bool {
         let c = core(cur), a = core(alt)
         guard a.count >= 1, c.count >= 1 else { return false }
-        if Settings.exceptions.contains(cur.lowercased()) || Settings.exceptions.contains(c.lowercased()) { return false }
+        if Settings.isMine(cur) || Settings.isMine(c) { return false }
         if Settings.learnedSwitch.contains(c.lowercased()) { return true }
         if cur.contains(where: { $0.isNumber }) { return false }
         if cur.contains("@") || cur.contains("://") { return false }
@@ -138,7 +138,7 @@ enum Detector {
         // Identifiers like "iOS", "McD": leave mixed case alone.
         if cur.dropFirst().contains(where: { $0.isUppercase }) && cur != cur.uppercased() { return false }
         let c = cur.lowercased()
-        if Settings.exceptions.contains(where: { $0.hasPrefix(c) || ($0.count >= 3 && c.hasPrefix($0)) }) { return false }
+        if Settings.exceptions.union(Settings.sessionIgnored).contains(where: { $0.hasPrefix(c) || ($0.count >= 3 && c.hasPrefix($0)) }) { return false }
         guard Spell.completions(c, curLang).isEmpty else { return false }
         guard Spell.completions(alt.lowercased(), altLang).count >= 3 else { return false }
         return plausibility(alt, altLang) >= plausibility(cur, curLang) - 0.2

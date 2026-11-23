@@ -32,9 +32,11 @@ final class KeyboardEngine {
     /// `byKeyla`: the shown text is Keyla's conversion, so converting it back means "that was wrong".
     private struct LastWord { let strokes: [Stroke]; let shown: String; let layout: KeyLayout; let boundary: String; var byKeyla = false }
 
-    private var word: [Stroke] = [] { didSet { if word.isEmpty { midSwitch = nil; vetoWord = false } } }
+    private var word: [Stroke] = [] { didSet { if word.isEmpty { midSwitch = nil; vetoWord = false; askWhenWordEnds = false } } }
     /// The user undid a switch inside this word — leave it alone until it ends.
     private var vetoWord = false
+    /// Ask "remember?" about the whole word once it's finished (the user undid a switch mid-word).
+    private var askWhenWordEnds = false
     /// Set when the current word was switched while typing: (original layout, what was on screen).
     private var midSwitch: (from: KeyLayout, typed: String)?
     /// A one-letter word right before the current one ("z" before "ghbdtn") — fixed together with it.
@@ -192,7 +194,7 @@ final class KeyboardEngine {
         let a = alt.text(p.strokes)
         guard Detector.common[alt.lang]?.contains(a.lowercased()) == true,
               Detector.common[cur.lang]?.contains(p.shown.lowercased()) != true,
-              !Settings.exceptions.contains(p.shown.lowercased()) else { return (0, "") }
+              !Settings.isMine(p.shown) else { return (0, "") }
         return (p.shown.count + p.boundary.count, a + p.boundary)
     }
 
@@ -236,8 +238,15 @@ final class KeyboardEngine {
 
     private func wordEnded(boundary: String) -> Bool {
         let strokes = word
-        let vetoed = vetoWord, switchedWhileTyping = midSwitch != nil
+        let vetoed = vetoWord, mid = midSwitch, askNow = askWhenWordEnds
         word = []
+        if askNow, let cur = layouts.current {
+            let w = Detector.core(cur.text(strokes))
+            Settings.sessionIgnored.insert(w.lowercased())
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                LearnPrompt.shared.ask(w, reason: "Больше не переключать раскладку на нём")
+            }
+        }
         guard !strokes.isEmpty, let cur = layouts.current else {
             lastWord = nil
             sentence += boundary
@@ -246,8 +255,9 @@ final class KeyboardEngine {
         let typed = cur.text(strokes)
         let excluded = frontAppExcluded || AX.isSecureField()
 
-        if switchedWhileTyping {        // already switched while typing
+        if let mid {                    // already switched while typing — ⌫ right after the space still undoes it
             bumpLang(cur.lang)
+            pendingUndo = Undo(original: mid.from.text(strokes), replaced: typed, boundary: boundary, fromLayout: mid.from, strokes: strokes)
             prevSingle = nil
             lastWord = LastWord(strokes: strokes, shown: typed, layout: cur, boundary: boundary, byKeyla: true)
             sentence += boundary
@@ -281,7 +291,7 @@ final class KeyboardEngine {
         guard !excluded else { return false }
         let core = Detector.core(typed)
         let checkable = core.count >= 3 && !typed.contains(where: { $0.isNumber })
-            && core != core.uppercased() && !Settings.exceptions.contains(core.lowercased())
+            && core != core.uppercased() && !Settings.isMine(core)
         if checkable && !Spell.isValid(core, cur.lang) {
             if Settings.autocorrect, let fix = Spell.correction(core, cur.lang), fix != core {
                 let fixed = typed.replacingOccurrences(of: core, with: fix)
@@ -292,6 +302,14 @@ final class KeyboardEngine {
                 sentence = String(sentence.dropLast(typed.count + boundary.count)) + fixed + boundary
                 DispatchQueue.main.async { HUD.shared.show("\(core) → \(fix)", "⌫ — вернуть как было", badge: "Aa") }
                 return true
+            }
+            // The same unknown word again and again → probably the user's own word: offer to remember it.
+            let uses = Settings.noteUnknown(core)
+            if uses >= 2 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    LearnPrompt.shared.ask(core, reason: "Пишете его уже \(uses) \(uses < 5 ? "раза" : "раз") — больше не подчёркивать")
+                }
+                return false
             }
             if Settings.spellHints {
                 let g = Spell.guesses(core, cur.lang).prefix(3)
@@ -325,12 +343,20 @@ final class KeyboardEngine {
     private func undo(_ u: Undo) {
         TextInjector.replace(deleting: u.replaced.count + u.boundary.count, with: u.original)
         if let from = u.fromLayout { layouts.select(from) }
-        Settings.addException(u.original)     // don't touch this word again
+        // Leave it alone for now and ask whether it's one of the user's words.
+        let w = Detector.core(u.original)
+        let midWord = u.boundary.isEmpty && u.fromLayout != nil
         word = u.fromLayout != nil ? u.strokes : []
         midSwitch = nil
-        vetoWord = u.boundary.isEmpty && u.fromLayout != nil
+        vetoWord = midWord
+        askWhenWordEnds = midWord
         lastWord = nil
-        HUD.shared.show(u.original, "Запомнил — больше не трогаю", badge: "↩")
+        if midWord {
+            HUD.shared.show(u.original, "Вернул как было", badge: "↩")
+        } else {
+            Settings.sessionIgnored.insert(w.lowercased())
+            LearnPrompt.shared.ask(w, reason: u.fromLayout != nil ? "Больше не переключать раскладку на нём" : "Больше не исправлять его")
+        }
     }
 
     // MARK: Manual conversion (double Shift)
@@ -341,7 +367,11 @@ final class KeyboardEngine {
 
         if !word.isEmpty, let alt = layouts.alternate(for: cur) {             // word in progress
             let shown = cur.text(word), other = alt.text(word)
-            if let m = midSwitch { Settings.addException(m.typed) }          // undoing Keyla's instant switch
+            if let m = midSwitch {                                           // undoing Keyla's instant switch
+                Settings.sessionIgnored.insert(m.typed.lowercased())
+                vetoWord = true
+                askWhenWordEnds = true
+            }
             else { Settings.learnSwitch(Detector.core(shown)) }
             midSwitch = nil
             TextInjector.replace(deleting: shown.count, with: other)
@@ -351,7 +381,13 @@ final class KeyboardEngine {
         }
         if let lw = lastWord, let target = layouts.alternate(for: lw.layout) { // just-finished word
             let other = target.text(lw.strokes)
-            if lw.byKeyla { Settings.addException(Detector.core(other)) }   // undoing Keyla's switch
+            if lw.byKeyla {                                                   // undoing Keyla's switch
+                let w = Detector.core(other)
+                Settings.sessionIgnored.insert(w.lowercased())
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                    LearnPrompt.shared.ask(w, reason: "Больше не переключать раскладку на нём")
+                }
+            }
             else { Settings.learnSwitch(Detector.core(lw.shown)) }          // user's own fix → remember it
             TextInjector.replace(deleting: lw.shown.count + lw.boundary.count, with: other + lw.boundary)
             layouts.select(target)

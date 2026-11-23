@@ -98,8 +98,8 @@ final class InlineMarks {
             menu.addItem(item)
         }
         menu.addItem(.separator())
-        menu.addItem(ClosureItem(title: "Добавить «\(m.word)» в словарь") { [weak self] in
-            NSSpellChecker.shared.learnWord(m.word)
+        menu.addItem(ClosureItem(title: "Запомнить «\(m.word)» — моё слово") { [weak self] in
+            Settings.remember(m.word)
             self?.remove(m)
         })
         menu.addItem(ClosureItem(title: "Пропустить") { [weak self] in self?.remove(m) })

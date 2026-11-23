@@ -143,6 +143,7 @@ private struct SpellingTab: View {
     @AppStorage("spellHints") var spellHints = true
     @AppStorage("autocorrect") var autocorrect = false
     @AppStorage("inlineMarks") var inline = true
+    @AppStorage("askToLearn") var askToLearn = true
     @AppStorage("grammarHints") var grammarHints = true
     @AppStorage("exceptions") var exceptions = ""
     @AppStorage("learnedSwitch") var learned = ""
@@ -158,9 +159,11 @@ private struct SpellingTab: View {
             Rule()
             Toggle("Проверять грамматику предложений", isOn: $grammarHints).toggleStyle(CircleToggleStyle())
             Rule()
-            LineEditor(title: "Исключения — не переключать и не исправлять", text: $exceptions)
+            Toggle("Предлагать запомнить мои слова", isOn: $askToLearn).toggleStyle(CircleToggleStyle())
+            Rule()
+            LineEditor(title: "Мои слова — не переключать, не исправлять, не подчёркивать", text: $exceptions)
             LineEditor(title: "Выученные слова — переключать всегда", text: $learned)
-            Note(text: "Словари — системные macOS, работают офлайн. Нажмите на подчёркнутое слово — появятся варианты. ⌃⌥G на выделенном тексте открывает помощника письма.")
+            Note(text: "Словари — системные macOS, работают офлайн. Нажмите на подчёркнутое слово — появятся варианты. Если вы отменяете исправление Keyla или часто пишете незнакомое словарям слово — армянское латиницей или кириллицей, жаргон, имя, — Keyla предложит его запомнить. ⌃⌥G на выделенном тексте открывает помощника письма.")
         }
     }
 }

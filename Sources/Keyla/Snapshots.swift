@@ -59,6 +59,10 @@ enum Snapshots {
             render(HUDView(model: hud).padding(12).background(Color.white), "hud-\(i)", to: dir)
         }
         let om = OnboardingModel()
+        let lm = LearnPrompt.Model()
+        lm.word = "барев"
+        lm.reason = "Пишете его уже 3 раза — больше не подчёркивать"
+        render(LearnView(model: lm, remember: {}, dismiss: {}).padding(12).background(Color.white), "learn-prompt", to: dir)
         render(OnboardingView(model: om, openAccessibility: {}, openInputMonitoring: {}, setLogin: { _ in }, done: {}), "onboarding-start", to: dir)
         om.accessibility = true; om.inputMonitoring = true; om.loginItem = true; om.tryText = "привет "
         render(OnboardingView(model: om, openAccessibility: {}, openInputMonitoring: {}, setLogin: { _ in }, done: {}), "onboarding-done", to: dir)
